@@ -3,8 +3,21 @@ from typing import TypedDict
 from pynput import keyboard
 import threading
 
+SELECTION_DIALOG_TITLE = "Launcher Selection Dialog"
+SELECTION_DIALOG_PROMPT = "Choose"
+
+
+class WindowInfo(TypedDict):
+    app_name: str | None
+    window_title: str | None
+    bundle_id: str | None
+
+
 # Lock to prevent concurrent launcher executions
 launcher_lock = threading.Lock()
+
+# Global variable to track the original window for escape handler
+original_window: WindowInfo | None = None
 
 
 def run_osascript(script) -> tuple[str, int]:
@@ -16,12 +29,6 @@ def run_osascript(script) -> tuple[str, int]:
     except Exception as e:
         print(f"Error running osascript: {e}")
         return "", 1
-
-
-class WindowInfo(TypedDict):
-    app_name: str | None
-    window_title: str | None
-    bundle_id: str | None
 
 
 def get_focused_window() -> WindowInfo | None:
@@ -51,15 +58,13 @@ def get_focused_window() -> WindowInfo | None:
 
 
 def show_selection_dialog(items: list[str]):
-    """Show a selection dialog with the given items."""
-    # Convert list to AppleScript list format
     items_str = ", ".join(f'"{item}"' for item in items)
 
     script = f"""
     tell application "System Events"
         activate
         set itemList to {{{items_str}}}
-        set chosenItem to choose from list itemList with prompt "Choose an option:" with title "Selection Dialog"
+        set chosenItem to choose from list itemList with prompt "{SELECTION_DIALOG_PROMPT}" with title "{SELECTION_DIALOG_TITLE}"
         if chosenItem is false then
             return ""
         else
@@ -75,8 +80,43 @@ def show_selection_dialog(items: list[str]):
     return None
 
 
+def is_selection_dialog_active() -> bool:
+    script = f"""
+    tell application "System Events"
+        try
+            set dialogExists to exists (first window of application process "System Events" whose name is "{SELECTION_DIALOG_TITLE}")
+            return dialogExists
+        on error
+            return false
+        end try
+    end tell
+    """
+
+    output, returncode = run_osascript(script)
+    return returncode == 0 and output.strip() == "true"
+
+
+def close_selection_dialog():
+    script = f"""
+    tell application "System Events"
+        try
+            set dialogWindow to first window of application process "System Events" whose name is "{SELECTION_DIALOG_TITLE}"
+            set frontmost of application process "System Events" to true
+            perform action "AXRaise" of dialogWindow
+            delay 0.1
+            key code 53
+            return true
+        on error
+            return false
+        end try
+    end tell
+    """
+
+    output, returncode = run_osascript(script)
+    return returncode == 0 and output.strip() == "true"
+
+
 def refocus_window(window_info: WindowInfo):
-    """Refocus the specified window."""
     if not window_info or not window_info["app_name"]:
         return False
 
@@ -121,12 +161,12 @@ def refocus_window(window_info: WindowInfo):
 
 
 def run_launcher():
-    # Try to acquire the lock without blocking
+    global original_window
+
     if not launcher_lock.acquire(blocking=False):
         print("Launcher is already running. Ignoring request.")
         return
 
-    # Step 1: Get the currently focused window
     print("Getting currently focused window...")
     original_window = get_focused_window()
 
@@ -137,7 +177,6 @@ def run_launcher():
     else:
         print("No focused window detected")
 
-    # Step 2: Present a list of options
     options = [
         "x: Hello",
         "y: World",
@@ -149,26 +188,26 @@ def run_launcher():
     print("\nShowing selection dialog...")
     chosen = show_selection_dialog(options)
 
-    # Step 3: Handle the choice
+    # Handle the choice
     if chosen:
         print(f"\nChosen item: {chosen}")
     else:
         print("\nNo item chosen (user cancelled)")
 
-        # Refocus the original window
-        if original_window:
-            print("Refocusing original window...")
-            if refocus_window(original_window):
-                print(f"Refocused: {original_window['app_name']}")
-            else:
-                print("Failed to refocus window")
+    # Always refocus the original window when no choice was made
+    if not chosen and original_window:
+        print("Refocusing original window...")
+        if refocus_window(original_window):
+            print(f"Refocused: {original_window['app_name']}")
+        else:
+            print("Failed to refocus window")
 
-    # Always release the lock
+    original_window = None
     launcher_lock.release()
 
 
 def on_activate():
-    print("Hotkey activated!")
+    print("Hotkey activated")
     # Run shortcut in a separate thread to avoid blocking
     threading.Thread(target=run_launcher, daemon=True).start()
 
@@ -178,18 +217,19 @@ hotkey = keyboard.HotKey(keyboard.HotKey.parse("<cmd>+<shift>+<enter>"), on_acti
 
 
 def on_press(key: keyboard.Key | keyboard.KeyCode | None):
-    """Handle key press events"""
     if key == None:
         return
     elif key == keyboard.Key.esc:
-        # TODO
-        pass
+        # Check if there's an active selection dialog and close it
+        if is_selection_dialog_active():
+            print("Closing active launcher dialog...")
+            close_selection_dialog()
+            # The normal flow in run_launcher() will handle refocusing
     else:
         hotkey.press(listener.canonical(key))
 
 
 def on_release(key: keyboard.Key | keyboard.KeyCode | None):
-    """Handle key release events"""
     if key == None:
         return
     else:
