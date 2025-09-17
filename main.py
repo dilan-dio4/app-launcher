@@ -67,6 +67,9 @@ launcher_lock = threading.Lock()
 # Global variable to track the original window for escape handler
 original_window: WindowInfo | None = None
 
+# Queue for launcher requests (maxsize=1 to ignore rapid requests)
+launcher_queue: queue.Queue[None] = queue.Queue(maxsize=1)
+
 
 def run_osascript(script) -> tuple[str, int]:
     try:
@@ -290,7 +293,7 @@ def open_url(url: str):
     run_osascript_nonblocking(script)
 
 
-def run_launcher():
+def _run_launcher_impl():
     global original_window
 
     if not launcher_lock.acquire(blocking=False):
@@ -326,9 +329,29 @@ def run_launcher():
     launcher_lock.release()
 
 
+def launcher_worker():
+    while True:
+        try:
+            # Blocks
+            launcher_queue.get()
+
+            # Process the launcher request
+            _run_launcher_impl()
+
+            # Mark task as done
+            launcher_queue.task_done()
+
+        except Exception as e:
+            print(f"Error in launcher worker thread: {e}")
+
+
 def on_activate():
-    # Run shortcut in a separate thread to avoid blocking
-    threading.Thread(target=run_launcher, daemon=True).start()
+    try:
+        # Try to queue the launcher request (non-blocking)
+        launcher_queue.put_nowait(None)
+    except queue.Full:
+        # Launcher request is already queued or running, ignore this one
+        pass
 
 
 # Define the hotkey for activating the shortcut
@@ -353,6 +376,10 @@ def on_release(key: keyboard.Key | keyboard.KeyCode | None):
     else:
         hotkey.release(listener.canonical(key))
 
+
+# Start the launcher worker thread
+launcher_worker_thread = threading.Thread(target=launcher_worker, daemon=True)
+launcher_worker_thread.start()
 
 if __name__ == "__main__":
     with keyboard.Listener(
