@@ -196,23 +196,7 @@ def capture_window_and_show_dialog(
     return None, None
 
 
-def is_selection_dialog_active() -> bool:
-    script = f"""
-    tell application "System Events"
-        try
-            set dialogExists to exists (first window of application process "System Events" whose name is "{SELECTION_DIALOG_TITLE}")
-            return dialogExists
-        on error
-            return false
-        end try
-    end tell
-    """
-
-    output, returncode = run_osascript(script)
-    return returncode == 0 and output.strip() == "true"
-
-
-def close_selection_dialog():
+def close_selection_dialog_if_active() -> bool:
     script = f"""
     tell application "System Events"
         try
@@ -298,33 +282,35 @@ def _run_launcher_impl():
         print("Launcher is already running. Ignoring request.")
         return
 
-    # Generate options from launcher items
-    options = sorted(LAUNCHER_ITEMS.keys())
+    try:
+        # Shouldn't throw an exception, but just in case
+        
+        options = sorted(LAUNCHER_ITEMS.keys())
 
-    original_window, chosen = capture_window_and_show_dialog(options)
+        original_window, chosen = capture_window_and_show_dialog(options)
 
-    # Handle the choice
-    if chosen:
-        # Find the corresponding launcher item
-        selected_item = LAUNCHER_ITEMS.get(chosen, None)
+        # Handle the choice
+        if chosen:
+            # Find the corresponding launcher item
+            selected_item = LAUNCHER_ITEMS.get(chosen, None)
 
-        if selected_item:
-            if selected_item["action_type"] == ActionType.APP:
-                open_application(selected_item["target"])
-            elif selected_item["action_type"] == ActionType.URL:
-                open_url(selected_item["target"])
+            if selected_item:
+                if selected_item["action_type"] == ActionType.APP:
+                    open_application(selected_item["target"])
+                elif selected_item["action_type"] == ActionType.URL:
+                    open_url(selected_item["target"])
+            else:
+                print(f"Could not find launcher item for: {chosen}")
         else:
-            print(f"Could not find launcher item for: {chosen}")
-    else:
-        print("\nNo item chosen (user cancelled)")
+            print("\nNo item chosen (user cancelled)")
 
-    # Always refocus the original window when no choice was made
-    if not chosen and original_window:
-        if not refocus_window(original_window):
-            print("Failed to refocus window")
-
-    original_window = None
-    launcher_lock.release()
+        # Always refocus the original window when no choice was made
+        if not chosen and original_window:
+            if not refocus_window(original_window):
+                print("Failed to refocus window")
+    finally:
+        original_window = None
+        launcher_lock.release()
 
 
 def launcher_worker():
@@ -360,10 +346,11 @@ def on_press(key: keyboard.Key | keyboard.KeyCode | None):
     if key == None:
         return
     elif key == keyboard.Key.esc:
-        # Check if there's an active selection dialog and close it
-        if is_selection_dialog_active():
-            close_selection_dialog()
-            # The normal flow in run_launcher() will handle refocusing
+        # Only try to close selection dialog if launcher is currently running
+        if launcher_lock.locked():
+            # Launcher is running, so dialog might be active
+            close_selection_dialog_if_active()
+        # The normal flow in run_launcher() will handle refocusing
     else:
         hotkey.press(listener.canonical(key))
 
