@@ -26,6 +26,7 @@ HOTKEY = "<cmd>+<shift>+<space>"
 SELECTION_DIALOG_TITLE = "Launcher Selection Dialog"
 SELECTION_DIALOG_PROMPT = "Choose"
 FOCUSED_WINDOW_DELIMITER = "§§§"
+APPLESCRIPT_NIL = "NIL"
 
 LAUNCHER_ITEMS: dict[str, LauncherItem] = {
     "gmail": LauncherItem(
@@ -59,6 +60,26 @@ LAUNCHER_ITEMS: dict[str, LauncherItem] = {
     "spotify": LauncherItem(
         action_type=ActionType.APP,
         target="Spotify",
+    ),
+    "claude": LauncherItem(
+        action_type=ActionType.APP,
+        target="Claude",
+    ),
+    "orbstack": LauncherItem(
+        action_type=ActionType.APP,
+        target="OrbStack",
+    ),
+    "todoist": LauncherItem(
+        action_type=ActionType.APP,
+        target="Todoist",
+    ),
+    "x": LauncherItem(
+        action_type=ActionType.URL,
+        target="https://x.com/home",
+    ),
+    "github": LauncherItem(
+        action_type=ActionType.URL,
+        target="https://github.com",
     ),
 }
 
@@ -94,55 +115,6 @@ def run_osascript_nonblocking(script) -> None:
         print(f"Error starting osascript: {e}")
 
 
-def get_focused_window() -> WindowInfo | None:
-    script = f"""
-    tell application "System Events"
-        set frontApp to name of first application process whose frontmost is true
-        set frontAppID to bundle identifier of first application process whose frontmost is true
-        try
-            set windowTitle to name of front window of application process frontApp
-            return frontApp & "{FOCUSED_WINDOW_DELIMITER}" & windowTitle & "{FOCUSED_WINDOW_DELIMITER}" & frontAppID
-        on error
-            return frontApp & "{FOCUSED_WINDOW_DELIMITER}{FOCUSED_WINDOW_DELIMITER}" & frontAppID
-        end try
-    end tell
-    """
-
-    output, returncode = run_osascript(script)
-
-    if returncode == 0 and output:
-        parts = output.split(FOCUSED_WINDOW_DELIMITER)
-        return WindowInfo(
-            app_name=parts[0] if len(parts) > 0 else None,
-            window_title=parts[1] if len(parts) > 1 and parts[1] else None,
-            bundle_id=parts[2] if len(parts) > 2 else None,
-        )
-    return None
-
-
-def show_selection_dialog(items: list[str]):
-    items_str = ", ".join(f'"{item}"' for item in items)
-
-    script = f"""
-    tell application "System Events"
-        activate
-        set itemList to {{{items_str}}}
-        set chosenItem to choose from list itemList with prompt "{SELECTION_DIALOG_PROMPT}" with title "{SELECTION_DIALOG_TITLE}"
-        if chosenItem is false then
-            return ""
-        else
-            return item 1 of chosenItem
-        end if
-    end tell
-    """
-
-    output, returncode = run_osascript(script)
-
-    if returncode == 0:
-        return output if output else None
-    return None
-
-
 def capture_window_and_show_dialog(
     items: list[str],
 ) -> tuple[WindowInfo | None, str | None]:
@@ -155,9 +127,9 @@ def capture_window_and_show_dialog(
         set frontAppID to bundle identifier of first application process whose frontmost is true
         try
             set windowTitle to name of front window of application process frontApp
-            set windowInfo to frontApp & "|" & windowTitle & "|" & frontAppID
+            set windowInfo to frontApp & "{FOCUSED_WINDOW_DELIMITER}" & windowTitle & "{FOCUSED_WINDOW_DELIMITER}" & frontAppID
         on error
-            set windowInfo to frontApp & "||" & frontAppID
+            set windowInfo to frontApp & "{FOCUSED_WINDOW_DELIMITER}" & "{APPLESCRIPT_NIL}" & "{FOCUSED_WINDOW_DELIMITER}" & frontAppID
         end try
 
         -- Now show the selection dialog
@@ -165,9 +137,9 @@ def capture_window_and_show_dialog(
         set itemList to {{{items_str}}}
         set chosenItem to choose from list itemList with prompt "{SELECTION_DIALOG_PROMPT}" with title "{SELECTION_DIALOG_TITLE}"
         if chosenItem is false then
-            return windowInfo & "||"
+            return windowInfo & "{FOCUSED_WINDOW_DELIMITER}{FOCUSED_WINDOW_DELIMITER}"
         else
-            return windowInfo & "||" & (item 1 of chosenItem)
+            return windowInfo & "{FOCUSED_WINDOW_DELIMITER}{FOCUSED_WINDOW_DELIMITER}" & (item 1 of chosenItem)
         end if
     end tell
     """
@@ -176,16 +148,28 @@ def capture_window_and_show_dialog(
 
     if returncode == 0 and output:
         # Parse the combined result: windowInfo||chosenItem
-        parts = output.split("||")
+        parts = output.split(f"{FOCUSED_WINDOW_DELIMITER}{FOCUSED_WINDOW_DELIMITER}")
 
         # Parse window info
-        window_parts = parts[0].split("|") if len(parts) > 0 else []
-        window_info = None
+        window_parts = (
+            parts[0].split(FOCUSED_WINDOW_DELIMITER) if len(parts) > 0 else []
+        )
+        window_info: WindowInfo | None = None
+
+        def parse_script_value(value: str | None) -> str | None:
+            if value == APPLESCRIPT_NIL:
+                return None
+
+            if value:
+                return value
+
+            return None
+
         if len(window_parts) >= 3:
             window_info = WindowInfo(
-                app_name=window_parts[0] if window_parts[0] else None,
-                window_title=window_parts[1] if window_parts[1] else None,
-                bundle_id=window_parts[2] if window_parts[2] else None,
+                app_name=parse_script_value(window_parts[0]),
+                window_title=parse_script_value(window_parts[1]),
+                bundle_id=parse_script_value(window_parts[2]),
             )
 
         # Parse chosen item
@@ -284,7 +268,6 @@ def _run_launcher_impl():
 
     try:
         # Shouldn't throw an exception, but just in case
-        
         options = sorted(LAUNCHER_ITEMS.keys())
 
         original_window, chosen = capture_window_and_show_dialog(options)
