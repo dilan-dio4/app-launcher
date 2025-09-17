@@ -216,10 +216,7 @@ def close_selection_dialog():
     tell application "System Events"
         try
             set dialogWindow to first window of application process "System Events" whose name is "{SELECTION_DIALOG_TITLE}"
-            set frontmost of application process "System Events" to true
-            perform action "AXRaise" of dialogWindow
-            delay 0.1
-            key code 53
+            click button "Cancel" of dialogWindow
             return true
         on error
             return false
