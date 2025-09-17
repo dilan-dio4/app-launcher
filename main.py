@@ -25,6 +25,7 @@ class WindowInfo(TypedDict):
 HOTKEY = "<cmd>+<shift>+<space>"
 SELECTION_DIALOG_TITLE = "Launcher Selection Dialog"
 SELECTION_DIALOG_PROMPT = "Choose"
+FOCUSED_WINDOW_DELIMITER = "§§§"
 
 LAUNCHER_ITEMS: dict[str, LauncherItem] = {
     "gmail": LauncherItem(
@@ -94,15 +95,15 @@ def run_osascript_nonblocking(script) -> None:
 
 
 def get_focused_window() -> WindowInfo | None:
-    script = """
+    script = f"""
     tell application "System Events"
         set frontApp to name of first application process whose frontmost is true
         set frontAppID to bundle identifier of first application process whose frontmost is true
         try
             set windowTitle to name of front window of application process frontApp
-            return frontApp & "|" & windowTitle & "|" & frontAppID
+            return frontApp & "{FOCUSED_WINDOW_DELIMITER}" & windowTitle & "{FOCUSED_WINDOW_DELIMITER}" & frontAppID
         on error
-            return frontApp & "||" & frontAppID
+            return frontApp & "{FOCUSED_WINDOW_DELIMITER}{FOCUSED_WINDOW_DELIMITER}" & frontAppID
         end try
     end tell
     """
@@ -110,7 +111,7 @@ def get_focused_window() -> WindowInfo | None:
     output, returncode = run_osascript(script)
 
     if returncode == 0 and output:
-        parts = output.split("|")
+        parts = output.split(FOCUSED_WINDOW_DELIMITER)
         return WindowInfo(
             app_name=parts[0] if len(parts) > 0 else None,
             window_title=parts[1] if len(parts) > 1 and parts[1] else None,
