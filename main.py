@@ -2,6 +2,7 @@ import subprocess
 from typing import TypedDict
 from pynput import keyboard
 import threading
+import queue
 from enum import Enum
 
 
@@ -21,6 +22,7 @@ class WindowInfo(TypedDict):
     bundle_id: str | None
 
 
+HOTKEY = "<cmd>+<shift>+<space>"
 SELECTION_DIALOG_TITLE = "Launcher Selection Dialog"
 SELECTION_DIALOG_PROMPT = "Choose"
 
@@ -77,6 +79,17 @@ def run_osascript(script) -> tuple[str, int]:
         return "", 1
 
 
+def run_osascript_nonblocking(script) -> None:
+    try:
+        subprocess.Popen(
+            args=["osascript", "-e", script],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        print(f"Error starting osascript: {e}")
+
+
 def get_focused_window() -> WindowInfo | None:
     script = """
     tell application "System Events"
@@ -124,6 +137,59 @@ def show_selection_dialog(items: list[str]):
     if returncode == 0:
         return output if output else None
     return None
+
+
+def capture_window_and_show_dialog(
+    items: list[str],
+) -> tuple[WindowInfo | None, str | None]:
+    items_str = ", ".join(f'"{item}"' for item in items)
+
+    script = f"""
+    tell application "System Events"
+        -- Capture current focused window first
+        set frontApp to name of first application process whose frontmost is true
+        set frontAppID to bundle identifier of first application process whose frontmost is true
+        try
+            set windowTitle to name of front window of application process frontApp
+            set windowInfo to frontApp & "|" & windowTitle & "|" & frontAppID
+        on error
+            set windowInfo to frontApp & "||" & frontAppID
+        end try
+
+        -- Now show the selection dialog
+        activate
+        set itemList to {{{items_str}}}
+        set chosenItem to choose from list itemList with prompt "{SELECTION_DIALOG_PROMPT}" with title "{SELECTION_DIALOG_TITLE}"
+        if chosenItem is false then
+            return windowInfo & "||"
+        else
+            return windowInfo & "||" & (item 1 of chosenItem)
+        end if
+    end tell
+    """
+
+    output, returncode = run_osascript(script)
+
+    if returncode == 0 and output:
+        # Parse the combined result: windowInfo||chosenItem
+        parts = output.split("||")
+
+        # Parse window info
+        window_parts = parts[0].split("|") if len(parts) > 0 else []
+        window_info = None
+        if len(window_parts) >= 3:
+            window_info = WindowInfo(
+                app_name=window_parts[0] if window_parts[0] else None,
+                window_title=window_parts[1] if window_parts[1] else None,
+                bundle_id=window_parts[2] if window_parts[2] else None,
+            )
+
+        # Parse chosen item
+        chosen_item = parts[1] if len(parts) > 1 and parts[1] else None
+
+        return window_info, chosen_item
+
+    return None, None
 
 
 def is_selection_dialog_active() -> bool:
@@ -206,36 +272,22 @@ def refocus_window(window_info: WindowInfo):
     return returncode == 0
 
 
-def open_application(app_name: str) -> bool:
+def open_application(app_name: str):
     script = f"""
     tell application "{app_name}"
         activate
     end tell
     """
 
-    output, returncode = run_osascript(script)
-
-    if returncode != 0:
-        print(f"Failed to open application: {app_name}")
-        return False
-
-    print(f"Opened application: {app_name}")
-    return True
+    run_osascript_nonblocking(script)
 
 
-def open_url(url: str) -> bool:
+def open_url(url: str):
     script = f"""
     open location "{url}"
     """
 
-    output, returncode = run_osascript(script)
-
-    if returncode != 0:
-        print(f"Failed to open URL: {url}")
-        return False
-
-    print(f"Opened URL: {url}")
-    return True
+    run_osascript_nonblocking(script)
 
 
 def run_launcher():
@@ -245,39 +297,21 @@ def run_launcher():
         print("Launcher is already running. Ignoring request.")
         return
 
-    print("Getting currently focused window...")
-    original_window = get_focused_window()
-
-    if original_window:
-        print(f"Focused window: {original_window['app_name']}")
-        if original_window["window_title"]:
-            print(f"Window title: {original_window['window_title']}")
-    else:
-        print("No focused window detected")
-
     # Generate options from launcher items
     options = sorted(LAUNCHER_ITEMS.keys())
 
-    print("\nShowing selection dialog...")
-    chosen = show_selection_dialog(options)
+    original_window, chosen = capture_window_and_show_dialog(options)
 
     # Handle the choice
     if chosen:
-        print(f"\nChosen item: {chosen}")
-
         # Find the corresponding launcher item
         selected_item = LAUNCHER_ITEMS.get(chosen, None)
 
         if selected_item:
-            # Execute the action based on type
-            success = False
             if selected_item["action_type"] == ActionType.APP:
-                success = open_application(selected_item["target"])
+                open_application(selected_item["target"])
             elif selected_item["action_type"] == ActionType.URL:
-                success = open_url(selected_item["target"])
-
-            if not success:
-                print(f"Failed to execute action for: {chosen}")
+                open_url(selected_item["target"])
         else:
             print(f"Could not find launcher item for: {chosen}")
     else:
@@ -285,10 +319,7 @@ def run_launcher():
 
     # Always refocus the original window when no choice was made
     if not chosen and original_window:
-        print("Refocusing original window...")
-        if refocus_window(original_window):
-            print(f"Refocused: {original_window['app_name']}")
-        else:
+        if not refocus_window(original_window):
             print("Failed to refocus window")
 
     original_window = None
@@ -296,13 +327,12 @@ def run_launcher():
 
 
 def on_activate():
-    print("Hotkey activated")
     # Run shortcut in a separate thread to avoid blocking
     threading.Thread(target=run_launcher, daemon=True).start()
 
 
 # Define the hotkey for activating the shortcut
-hotkey = keyboard.HotKey(keyboard.HotKey.parse("<cmd>+<shift>+<enter>"), on_activate)
+hotkey = keyboard.HotKey(keyboard.HotKey.parse(HOTKEY), on_activate)
 
 
 def on_press(key: keyboard.Key | keyboard.KeyCode | None):
@@ -311,7 +341,6 @@ def on_press(key: keyboard.Key | keyboard.KeyCode | None):
     elif key == keyboard.Key.esc:
         # Check if there's an active selection dialog and close it
         if is_selection_dialog_active():
-            print("Closing active launcher dialog...")
             close_selection_dialog()
             # The normal flow in run_launcher() will handle refocusing
     else:
@@ -330,6 +359,6 @@ if __name__ == "__main__":
         on_press=on_press,
         on_release=on_release,
     ) as listener:
-        print("Listening for 'cmd+shift+enter' to run your shortcut.")
+        print(f"Listening for '{HOTKEY}' to run your shortcut.")
         print("Press 'escape' to kill a running shortcut.")
         listener.join()
