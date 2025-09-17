@@ -2,9 +2,17 @@ import subprocess
 from typing import TypedDict
 from pynput import keyboard
 import threading
+from enum import Enum
 
-SELECTION_DIALOG_TITLE = "Launcher Selection Dialog"
-SELECTION_DIALOG_PROMPT = "Choose"
+
+class ActionType(Enum):
+    APP = "app"
+    URL = "url"
+
+
+class LauncherItem(TypedDict):
+    action_type: ActionType
+    target: str
 
 
 class WindowInfo(TypedDict):
@@ -12,6 +20,44 @@ class WindowInfo(TypedDict):
     window_title: str | None
     bundle_id: str | None
 
+
+SELECTION_DIALOG_TITLE = "Launcher Selection Dialog"
+SELECTION_DIALOG_PROMPT = "Choose"
+
+LAUNCHER_ITEMS: dict[str, LauncherItem] = {
+    "gmail": LauncherItem(
+        action_type=ActionType.URL,
+        target="https://mail.google.com/mail/u/0/#inbox",
+    ),
+    "vscode": LauncherItem(
+        action_type=ActionType.APP,
+        target="Visual Studio Code",
+    ),
+    "youtube": LauncherItem(
+        action_type=ActionType.APP,
+        target="YouTube",
+    ),
+    "xcode": LauncherItem(
+        action_type=ActionType.APP,
+        target="Xcode-26.0.0",
+    ),
+    "edge": LauncherItem(
+        action_type=ActionType.APP,
+        target="Microsoft Edge",
+    ),
+    "messages": LauncherItem(
+        action_type=ActionType.APP,
+        target="Messages",
+    ),
+    "warp": LauncherItem(
+        action_type=ActionType.APP,
+        target="Warp",
+    ),
+    "spotify": LauncherItem(
+        action_type=ActionType.APP,
+        target="Spotify",
+    ),
+}
 
 # Lock to prevent concurrent launcher executions
 launcher_lock = threading.Lock()
@@ -160,6 +206,38 @@ def refocus_window(window_info: WindowInfo):
     return returncode == 0
 
 
+def open_application(app_name: str) -> bool:
+    script = f"""
+    tell application "{app_name}"
+        activate
+    end tell
+    """
+
+    output, returncode = run_osascript(script)
+
+    if returncode != 0:
+        print(f"Failed to open application: {app_name}")
+        return False
+
+    print(f"Opened application: {app_name}")
+    return True
+
+
+def open_url(url: str) -> bool:
+    script = f"""
+    open location "{url}"
+    """
+
+    output, returncode = run_osascript(script)
+
+    if returncode != 0:
+        print(f"Failed to open URL: {url}")
+        return False
+
+    print(f"Opened URL: {url}")
+    return True
+
+
 def run_launcher():
     global original_window
 
@@ -177,13 +255,8 @@ def run_launcher():
     else:
         print("No focused window detected")
 
-    options = [
-        "x: Hello",
-        "y: World",
-        "a: Python",
-        "Option 4: macOS",
-        "Option 5: Script",
-    ]
+    # Generate options from launcher items
+    options = sorted(LAUNCHER_ITEMS.keys())
 
     print("\nShowing selection dialog...")
     chosen = show_selection_dialog(options)
@@ -191,6 +264,22 @@ def run_launcher():
     # Handle the choice
     if chosen:
         print(f"\nChosen item: {chosen}")
+
+        # Find the corresponding launcher item
+        selected_item = LAUNCHER_ITEMS.get(chosen, None)
+
+        if selected_item:
+            # Execute the action based on type
+            success = False
+            if selected_item["action_type"] == ActionType.APP:
+                success = open_application(selected_item["target"])
+            elif selected_item["action_type"] == ActionType.URL:
+                success = open_url(selected_item["target"])
+
+            if not success:
+                print(f"Failed to execute action for: {chosen}")
+        else:
+            print(f"Could not find launcher item for: {chosen}")
     else:
         print("\nNo item chosen (user cancelled)")
 
