@@ -115,36 +115,49 @@ def run_osascript_nonblocking(script) -> None:
         print(f"Error starting osascript: {e}")
 
 
+def run_compiled_script(script_name: str, args: list[str] | None = None) -> tuple[str, int]:
+    script_path = f"scripts/compiled/{script_name}.scpt"
+    cmd = ["osascript", script_path]
+    if args:
+        cmd.extend(args)
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        return result.stdout.strip(), result.returncode
+    except Exception as e:
+        print(f"Error running compiled script {script_name}: {e}")
+        return "", 1
+
+
+def run_compiled_script_nonblocking(script_name: str, args: list[str] | None = None) -> None:
+    script_path = f"scripts/compiled/{script_name}.scpt"
+    cmd = ["osascript", script_path]
+    if args:
+        cmd.extend(args)
+
+    try:
+        subprocess.Popen(
+            args=cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        print(f"Error starting compiled script {script_name}: {e}")
+
+
 def capture_window_and_show_dialog(
     items: list[str],
 ) -> tuple[WindowInfo | None, str | None]:
-    items_str = ", ".join(f'"{item}"' for item in items)
+    # Prepare arguments: constants first, then items
+    args = [
+        SELECTION_DIALOG_TITLE,
+        SELECTION_DIALOG_PROMPT,
+        FOCUSED_WINDOW_DELIMITER,
+        APPLESCRIPT_NIL,
+    ]
+    args.extend(items)
 
-    script = f"""
-    tell application "System Events"
-        -- Capture current focused window first
-        set frontApp to name of first application process whose frontmost is true
-        set frontAppID to bundle identifier of first application process whose frontmost is true
-        try
-            set windowTitle to name of front window of application process frontApp
-            set windowInfo to frontApp & "{FOCUSED_WINDOW_DELIMITER}" & windowTitle & "{FOCUSED_WINDOW_DELIMITER}" & frontAppID
-        on error
-            set windowInfo to frontApp & "{FOCUSED_WINDOW_DELIMITER}" & "{APPLESCRIPT_NIL}" & "{FOCUSED_WINDOW_DELIMITER}" & frontAppID
-        end try
-
-        -- Now show the selection dialog
-        activate
-        set itemList to {{{items_str}}}
-        set chosenItem to choose from list itemList with prompt "{SELECTION_DIALOG_PROMPT}" with title "{SELECTION_DIALOG_TITLE}"
-        if chosenItem is false then
-            return windowInfo & "{FOCUSED_WINDOW_DELIMITER}{FOCUSED_WINDOW_DELIMITER}"
-        else
-            return windowInfo & "{FOCUSED_WINDOW_DELIMITER}{FOCUSED_WINDOW_DELIMITER}" & (item 1 of chosenItem)
-        end if
-    end tell
-    """
-
-    output, returncode = run_osascript(script)
+    output, returncode = run_compiled_script("capture_window_and_show_dialog", args)
 
     if returncode == 0 and output:
         # Parse the combined result: windowInfo||chosenItem
@@ -180,21 +193,8 @@ def capture_window_and_show_dialog(
     return None, None
 
 
-def close_selection_dialog_if_active() -> bool:
-    script = f"""
-    tell application "System Events"
-        try
-            set dialogWindow to first window of application process "System Events" whose name is "{SELECTION_DIALOG_TITLE}"
-            click button "Cancel" of dialogWindow
-            return true
-        on error
-            return false
-        end try
-    end tell
-    """
-
-    output, returncode = run_osascript(script)
-    return returncode == 0 and output.strip() == "true"
+def close_selection_dialog_if_active():
+    run_compiled_script_nonblocking("close_selection_dialog", [SELECTION_DIALOG_TITLE])
 
 
 def refocus_window(window_info: WindowInfo):
@@ -203,60 +203,30 @@ def refocus_window(window_info: WindowInfo):
 
     app_name = window_info["app_name"]
     window_title = window_info["window_title"]
+    bundle_id = window_info["bundle_id"]
 
-    # First, activate the application
-    script = f"""
-    tell application "{app_name}"
-        activate
-    end tell
-    """
+    # First, try using bundle ID (more reliable)
+    returncode = 1
+    if bundle_id:
+        _, returncode = run_compiled_script("refocus_window_by_bundle", [bundle_id])
 
-    _, returncode = run_osascript(script)
-
+    # If bundle ID failed, try app name
     if returncode != 0:
-        # Try using bundle ID if app name didn't work
-        if window_info["bundle_id"]:
-            script = f"""
-            tell application id "{window_info['bundle_id']}"
-                activate
-            end tell
-            """
-            _, returncode = run_osascript(script)
+        _, returncode = run_compiled_script("refocus_window_by_name", [app_name])
 
     # If we have a specific window title, try to bring it to front
     if returncode == 0 and window_title:
-        script = f"""
-        tell application "System Events"
-            tell process "{app_name}"
-                set frontmost to true
-                try
-                    set theWindow to first window whose name is "{window_title}"
-                    perform action "AXRaise" of theWindow
-                end try
-            end tell
-        end tell
-        """
-        run_osascript(script)
+        run_compiled_script("refocus_window_specific", [app_name, window_title])
 
     return returncode == 0
 
 
 def open_application(app_name: str):
-    script = f"""
-    tell application "{app_name}"
-        activate
-    end tell
-    """
-
-    run_osascript_nonblocking(script)
+    run_compiled_script_nonblocking("open_application", [app_name])
 
 
 def open_url(url: str):
-    script = f"""
-    open location "{url}"
-    """
-
-    run_osascript_nonblocking(script)
+    run_compiled_script_nonblocking("open_url", [url])
 
 
 def _run_launcher_impl():
