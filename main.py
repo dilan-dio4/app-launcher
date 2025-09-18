@@ -22,7 +22,7 @@ class WindowInfo(TypedDict):
     bundle_id: str | None
 
 
-HOTKEY = "<cmd>+<shift>+<enter>"
+HOTKEY = "<cmd>+<shift>+\\"
 SELECTION_DIALOG_TITLE = "Launcher Selection"
 SELECTION_DIALOG_PROMPT = "Choose"
 FOCUSED_WINDOW_DELIMITER = "§§§"
