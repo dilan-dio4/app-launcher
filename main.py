@@ -291,7 +291,7 @@ def on_activate():
         pass
 
 
-# Define the hotkey for activating the shortcut
+# Define the hotkey for activating the launcher
 hotkey = keyboard.HotKey(keyboard.HotKey.parse(HOTKEY), on_activate)
 
 
@@ -324,6 +324,6 @@ if __name__ == "__main__":
         on_press=on_press,
         on_release=on_release,
     ) as listener:
-        print(f"Listening for '{HOTKEY}' to run your shortcut.")
-        print("Press 'escape' to kill a running shortcut.")
+        print(f"Listening for '{HOTKEY}' to run your launcher.")
+        print("Press 'escape' to kill a running launcher.")
         listener.join()
