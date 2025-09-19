@@ -9,14 +9,11 @@ property statusItem : missing value
 property statusItemImage : missing value
 
 on run {}
+	-- Set the app to run in the background (No dock item)
 	myApp's NSApplication's sharedApplication()'s setActivationPolicy:(myApp's NSApplicationActivationPolicyAccessory)
-
-	-- Remove this Thread check code, once your stand alone App bundle is built and running.
-	if my NSThread's isMainThread() as boolean then
-		my createStatusItem()
-	else
-		my performSelectorOnMainThread:"createStatusItem" withObject:(missing value) waitUntilDone:true
-	end if
+	
+	-- Create the status item
+	my createStatusItem()
 end run
 
 on createStatusItem()
@@ -61,11 +58,7 @@ end doStuff
 
 on quitStatusItem()
 	-- Remove this Thread check code, once your stand alone App bundle is built and running. 
-	if my NSThread's isMainThread() as boolean then
-		my removeStatusItem()
-	else
-		my performSelectorOnMainThread:"removeStatusItem" withObject:(missing value) waitUntilDone:true
-	end if
+	my removeStatusItem()
 	if name of myApp does not start with "Script" then
 		tell me to quit
 	end if
