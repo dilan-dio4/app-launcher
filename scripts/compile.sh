@@ -21,4 +21,13 @@ for script in scripts/applescript/*.applescript; do
     fi
 done
 
+osacompile -o "scripts/compiled/MenuApp.app" -s "scripts/menu_app.applescript"
+
+if [ $? -eq 0 ]; then
+    echo "✓ MenuApp compiled successfully"
+else
+    echo "✗ Failed to compile MenuApp"
+    exit 1
+fi
+
 echo "All AppleScript files compiled successfully!"
