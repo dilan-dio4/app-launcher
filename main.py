@@ -5,6 +5,7 @@ from enum import Enum
 import atexit
 import threading
 import queue
+import os
 
 
 class ActionType(Enum):
@@ -166,11 +167,36 @@ def on_release(key: keyboard.Key | keyboard.KeyCode | None):
     hotkey.release(listener.canonical(key))
 
 
+def make_menu_app_items() -> str:
+    # Sort launcher items alphabetically by key name
+    sorted_items = []
+    for name in sorted(LAUNCHER_ITEMS.keys()):
+        item = LAUNCHER_ITEMS[name]
+        sorted_items.append(
+            {
+                "name": name,
+                "action_type": item["action_type"].value,
+                "target": item["target"],
+            }
+        )
+
+    string_delimited_items = [
+        f'{item["name"]};{item["action_type"]};{item["target"]}'
+        for item in sorted_items
+    ]
+    return "\n".join(string_delimited_items)
+
+
 def start_menu_app():
+    process_env = os.environ.copy()
+    process_env["LAUNCHER_ITEMS"] = make_menu_app_items()
+
+    # Start the menu app
     try:
         subprocess.run(
             ["open", "./scripts/compiled/MenuApp.app"],
             check=True,
+            env=process_env,
         )
     except Exception as e:
         print(f"Error starting menu app: {e}")
