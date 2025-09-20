@@ -7,6 +7,11 @@ mkdir -p scripts/compiled
 echo "Compiling AppleScript files..."
 
 for script in scripts/applescript/*.applescript; do
+    # Ignore the MenuApp.applescript file
+    if [ "$script" == "scripts/applescript/MenuApp.applescript" ]; then
+        continue
+    fi
+
     if [ -f "$script" ]; then
         filename=$(basename "$script" .applescript)
         echo "Compiling $filename..."
@@ -21,7 +26,7 @@ for script in scripts/applescript/*.applescript; do
     fi
 done
 
-osacompile -o "scripts/compiled/MenuApp.app" -s "scripts/menu_app.applescript"
+osacompile -o "scripts/compiled/MenuApp.app" -s "scripts/applescript/MenuApp.applescript"
 
 if [ $? -eq 0 ]; then
     echo "✓ MenuApp compiled successfully"
