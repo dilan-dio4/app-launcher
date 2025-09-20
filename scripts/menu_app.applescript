@@ -99,9 +99,11 @@ on createMenuItems()
 end createMenuItems
 
 on openApplication(appName)
-	try
+	try	
 		tell application appName
-			activate
+			ignoring application responses
+				activate
+			end ignoring
 		end tell
 	on error errMsg
 		display notification "Failed to open application: " & appName with title "App Launcher Error"
